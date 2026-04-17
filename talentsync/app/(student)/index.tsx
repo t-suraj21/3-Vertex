@@ -284,4 +284,5 @@ const styles = StyleSheet.create({
   tag: { backgroundColor: '#F3F4F6', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   tagText: { fontSize: 12, color: '#4B5563', fontWeight: '600' },
   salaryText: { fontSize: 14, fontWeight: '800', color: '#10B981' },
+  emptyJobsText: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', paddingVertical: 30, fontWeight: '500' },
 });

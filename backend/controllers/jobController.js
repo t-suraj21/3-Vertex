@@ -43,6 +43,18 @@ exports.getJobs = async (req, res) => {
   }
 };
 
+// @desc    Get Single Job by ID
+// @route   GET /api/jobs/:id
+exports.getJobById = async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.id).populate('companyId', 'companyName verifiedStatus');
+    if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+    res.status(200).json({ success: true, data: job });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
 // @desc    Get Jobs Posted By This Company
 // @route   GET /api/jobs/mine
 exports.getMyJobs = async (req, res) => {
