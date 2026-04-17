@@ -2,10 +2,9 @@ const Job = require('../models/Job');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const FormData = require('form-data');
 
-// ─── PYTHON NLP SERVICE URL ─────────────────────────────────────────────────
-const NLP_SERVICE_URL = process.env.NLP_SERVICE_URL || 'http://localhost:8000';
+// ─── BUILT-IN NLP ENGINE (replaces Python microservice) ─────────────────────
+const nlpEngine = require('../utils/nlpEngine');
 
 // ─── SKILL TAXONOMY (NLP KEYWORD DICTIONARY) ────────────────────────────────
 const SKILL_DICTIONARY = {
@@ -87,8 +86,8 @@ function categorizeSkills(skills) {
 }
 
 /**
- * @desc    Full Resume Analysis Pipeline:
- *          1. Python NLP Microservice (spacy + PyMuPDF) → text extraction, skill detection, scoring
+ * @desc    Full Resume Analysis Pipeline (All-in-One Node.js):
+ *          1. Built-in NLP Engine (pdf-parse + mammoth + keyword NLP) → text extraction, skill detection, scoring
  *          2. Gemini AI → deep ATS analysis, section scores, improvement suggestions
  *          3. Node.js → job matching, market insights, merged response
  * @route   POST /api/ai/parse-resume
@@ -100,67 +99,50 @@ exports.parseResume = async (req, res) => {
     let nlpResult = null;
 
     // ══════════════════════════════════════════════════════════════════════
-    // STEP 1: Send file to Python NLP Microservice for extraction + NLP
+    // STEP 1: Built-in NLP Engine — Text Extraction + Skill Detection + Scoring
     // ══════════════════════════════════════════════════════════════════════
     if (req.file) {
       console.log(`[PIPELINE] Received file: ${req.file.originalname} (${req.file.mimetype})`);
 
       try {
-        // Forward the uploaded file to Python NLP service
-        const formData = new FormData();
-        formData.append('file', fs.createReadStream(req.file.path), {
-          filename: req.file.originalname,
-          contentType: req.file.mimetype,
-        });
+        // Run the built-in NLP analysis pipeline (no external service needed)
+        nlpResult = await nlpEngine.analyzeResume(
+          req.file.path,
+          req.file.mimetype,
+          req.file.originalname
+        );
 
-        const nlpResponse = await axios.post(`${NLP_SERVICE_URL}/analyze`, formData, {
-          headers: formData.getHeaders(),
-          timeout: 30000,
-        });
+        console.log(`[NLP] Built-in engine returned: ${nlpResult.skills?.length || 0} skills, score=${nlpResult.score}, education=${nlpResult.education}, experience=${nlpResult.experience}`);
 
-        nlpResult = nlpResponse.data;
-        console.log(`[NLP] Python service returned: ${nlpResult.skills?.length || 0} skills, score=${nlpResult.score}, education=${nlpResult.education}, experience=${nlpResult.experience}`);
+        // Use the raw text extracted by our NLP engine for Gemini
+        resumeText = nlpResult.rawText || '';
 
-        // Use NLP-extracted text for Gemini (reconstruct from NLP service data)
-        // The NLP service already parsed the PDF, so we have structured data
-        resumeText = `Skills: ${(nlpResult.skills || []).join(', ')}. Education: ${nlpResult.education}. Experience: ${nlpResult.experience}. Improvements: ${(nlpResult.improvements || []).join('. ')}`;
+        // If raw text is short, reconstruct from NLP data
+        if (!resumeText || resumeText.length < 100) {
+          resumeText = `Skills: ${(nlpResult.skills || []).join(', ')}. Education: ${nlpResult.education}. Experience: ${nlpResult.experience}. Improvements: ${(nlpResult.improvements || []).join('. ')}`;
+        }
 
       } catch (nlpErr) {
-        console.warn(`[NLP] Python service unavailable (${nlpErr.message}). Falling back to pdf-parse...`);
+        console.warn(`[NLP] Built-in engine error: ${nlpErr.message}. Attempting direct text extraction...`);
 
-        // FALLBACK: Use pdf-parse if Python service is down
-        if (req.file.mimetype === 'application/pdf') {
-          try {
-            const pdfParse = require('pdf-parse');
-            const dataBuffer = fs.readFileSync(req.file.path);
-            const pdfData = await pdfParse(dataBuffer);
-            resumeText = pdfData.text || '';
-            console.log(`[PDF] Fallback: extracted ${resumeText.length} chars via pdf-parse`);
-          } catch (pdfErr) {
-            console.error('[PDF] pdf-parse also failed:', pdfErr.message);
-            return res.status(400).json({
-              success: false,
-              error: 'Could not extract text from PDF. Please upload a valid text-based PDF.',
-            });
-          }
-        } else {
-          resumeText = fs.readFileSync(req.file.path).toString('utf8');
+        // FALLBACK: Direct text extraction if full NLP pipeline fails
+        try {
+          resumeText = await nlpEngine.extractText(
+            req.file.path,
+            req.file.mimetype,
+            req.file.originalname
+          );
+          console.log(`[NLP] Fallback text extraction: ${resumeText.length} chars`);
+        } catch (extractErr) {
+          console.error('[NLP] Text extraction also failed:', extractErr.message);
+          return res.status(400).json({
+            success: false,
+            error: 'Could not extract text from your file. Please upload a valid PDF or DOCX.',
+          });
         }
       }
     } else if (req.body.resumeText) {
       resumeText = req.body.resumeText;
-    }
-
-    // Also try to extract raw text from PDF for Gemini (if NLP service succeeded but we need full text)
-    if (nlpResult && req.file && req.file.mimetype === 'application/pdf') {
-      try {
-        const pdfParse = require('pdf-parse');
-        const dataBuffer = fs.readFileSync(req.file.path);
-        const pdfData = await pdfParse(dataBuffer);
-        if (pdfData.text && pdfData.text.length > resumeText.length) {
-          resumeText = pdfData.text;
-        }
-      } catch (_) { /* Use NLP-reconstructed text */ }
     }
 
     if (!resumeText || resumeText.replace(/\s/g, '').length < 30) {
@@ -180,7 +162,7 @@ exports.parseResume = async (req, res) => {
       try {
         const safeText = resumeText.substring(0, 6000);
 
-        // Enrich the prompt with NLP service data if available
+        // Enrich the prompt with NLP engine data if available
         const nlpContext = nlpResult
           ? `\nPRE-ANALYSIS (from NLP engine): Skills detected: [${nlpResult.skills?.join(', ')}]. Education: ${nlpResult.education}. Experience Level: ${nlpResult.experience}. NLP Score: ${nlpResult.score}/100. Recommended Roles: ${nlpResult.recommended_jobs?.join(', ')}.\n`
           : '';
@@ -262,7 +244,7 @@ ${safeText}`;
 
     if (geminiResult && nlpResult) {
       // ── BEST CASE: Both engines succeeded → merge intelligently ────
-      console.log('[PIPELINE] Merging Gemini AI + Python NLP results');
+      console.log('[PIPELINE] Merging Gemini AI + Built-in NLP results');
 
       // Use Gemini for scores/feedback, NLP for additional skills
       const geminiSkills = geminiResult.extractedSkills || [];
@@ -279,7 +261,7 @@ ${safeText}`;
         whatToChange: geminiResult.whatToChange || [],
         howToImprove: geminiResult.howToImprove || [],
         keywordDensity: geminiResult.keywordDensity || {},
-        // NLP Service extras
+        // NLP Engine extras
         nlpScore: nlpResult.score,
         education: nlpResult.education,
         experience: nlpResult.experience,
@@ -308,8 +290,8 @@ ${safeText}`;
       };
 
     } else if (nlpResult) {
-      // ── Python NLP only (Gemini down) ───────────────────────────────
-      console.log('[PIPELINE] Using Python NLP results only (Gemini unavailable)');
+      // ── NLP only (Gemini down) ──────────────────────────────────────
+      console.log('[PIPELINE] Using Built-in NLP results only (Gemini unavailable)');
       const skills = nlpResult.skills || [];
       finalResult = {
         extractedSkills: skills,
@@ -349,9 +331,9 @@ ${safeText}`;
         atsScore,
         sectionScores: { formatting: 55, skills: Math.min(skills.length * 7, 95), experience: 50, education: 50, impact: 35 },
         profileTags: ['Candidate'],
-        summary: `Detected ${skills.length} skills via keyword matching. For better analysis, ensure the Python NLP service is running on port 8000.`,
-        whatToChange: ['Start the Python NLP service: cd resume-nlp-service && ./venv/bin/python app.py'],
-        howToImprove: ['Check Gemini API key in .env', 'Ensure NLP service is running on port 8000'],
+        summary: `Detected ${skills.length} skills via keyword matching. Enable Gemini API key for deeper analysis.`,
+        whatToChange: ['Add a Gemini API key in your .env file for comprehensive ATS analysis'],
+        howToImprove: ['Add quantifiable metrics to every project', 'Use STAR method for bullet points', 'Add a dedicated Technical Skills section'],
         keywordDensity: {},
         nlpScore: null,
         education: null,
@@ -425,7 +407,7 @@ ${safeText}`;
       howToImprove: finalResult.howToImprove,
       // NLP
       keywordDensity: finalResult.keywordDensity,
-      // NLP Microservice Data
+      // NLP Engine Data
       nlpScore: finalResult.nlpScore,
       education: finalResult.education,
       experience: finalResult.experience,
