@@ -1,5 +1,12 @@
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+
+// Auto-create upload directories so multer never fails with ENOENT
+const resumeDir = path.join(__dirname, '..', 'uploads', 'resumes');
+const avatarDir = path.join(__dirname, '..', 'uploads', 'avatars');
+fs.mkdirSync(resumeDir, { recursive: true });
+fs.mkdirSync(avatarDir, { recursive: true });
 
 // Storage config
 const storage = multer.diskStorage({
