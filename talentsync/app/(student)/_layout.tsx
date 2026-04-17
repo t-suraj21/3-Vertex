@@ -7,15 +7,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  
+
   return (
     <View style={[styles.tabBarContainer, { paddingBottom: Platform.OS === 'ios' ? insets.bottom : 20 }]}>
       <View style={styles.tabBarInner}>
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
-          
+
           const mainTabs = ['index', 'saved-jobs', 'recommended', 'profile'];
-          
+
           // Hide any route that is not one of our main 4 tabs
           if (!mainTabs.includes(route.name)) {
             return null;
@@ -30,11 +30,11 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             iconName = 'home';
             label = 'Home';
           } else if (route.name === 'saved-jobs') {
-            iconName = 'briefcase'; 
-            label = 'My Jobs';
+            iconName = 'briefcase';
+            label = 'Jobs';
           } else if (route.name === 'recommended') {
-            iconName = 'bell'; // Replicating the design image's bell icon
-            label = 'Activity';
+            iconName = 'file'; // Replicating the design image's bell icon
+            label = 'Resume';
           } else if (route.name === 'profile') {
             iconName = 'user';
             label = 'Profile';
@@ -58,10 +58,10 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               onPress={onPress}
               style={[styles.tabItem, isFocused && styles.tabItemFocused]}
             >
-              <Feather 
-                name={iconName} 
-                size={22} 
-                color={isFocused ? '#FFF' : '#1A1D3D'} 
+              <Feather
+                name={iconName}
+                size={22}
+                color={isFocused ? '#FFF' : '#1A1D3D'}
                 strokeWidth={isFocused ? 2.5 : 2}
               />
               {isFocused && (
@@ -79,7 +79,7 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
 export default function StudentLayout() {
   return (
-    <Tabs 
+    <Tabs
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{ headerShown: false }}
     >
@@ -87,7 +87,7 @@ export default function StudentLayout() {
       <Tabs.Screen name="saved-jobs" />
       <Tabs.Screen name="recommended" />
       <Tabs.Screen name="profile" />
-      
+
       {/* Hidden nested pages from tab bar */}
       <Tabs.Screen name="news" options={{ href: null }} />
       <Tabs.Screen name="notifications" options={{ href: null }} />
